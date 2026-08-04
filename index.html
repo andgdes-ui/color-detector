@@ -2,27 +2,459 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Тест камеры</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Колеровка по фото</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; }
+        body {
+            font-family: system-ui, sans-serif;
+            background: #121212;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        video {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 20px;
+            background: #000;
+            margin-bottom: 15px;
+            display: none;
+            transform: scaleX(-1);
+        }
+        canvas { display: none; }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 14px 24px;
+            border: none;
+            border-radius: 40px;
+            font-size: 16px;
+            font-weight: 600;
+            background: #2a9d8f;
+            color: #fff;
+            cursor: pointer;
+            transition: 0.15s;
+            flex: 1 0 auto;
+            max-width: 200px;
+        }
+        button:active { transform: scale(0.95); }
+        button:disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+        .btn-secondary { background: #264653; }
+        .btn-telegram { background: #0088cc; }
+        #status {
+            margin: 10px 0;
+            font-size: 14px;
+            color: #aaa;
+            text-align: center;
+            min-height: 1.5em;
+        }
+        #error-msg {
+            background: #442222;
+            color: #ff6b6b;
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            display: none;
+            max-width: 400px;
+            text-align: center;
+            font-size: 14px;
+        }
+        #result {
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-top: 10px;
+        }
+        .palette-block {
+            background: #1e1e1e;
+            border-radius: 14px;
+            padding: 14px 18px;
+            border-left: 5px solid #2a9d8f;
+        }
+        .palette-title {
+            font-size: 17px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .color-match {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }
+        .color-match:last-child { border-bottom: none; }
+        .color-swatch {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 1px solid #555;
+            flex-shrink: 0;
+        }
+        .color-name { flex: 1; font-size: 15px; }
+        .color-percent { font-size: 16px; font-weight: 700; color: #2a9d8f; }
+        .hex-code { font-size: 12px; color: #aaa; margin-left: 6px; }
+        .no-result { color: #888; font-style: italic; }
+        #loading {
+            display: none;
+            color: #aaa;
+            margin: 15px 0;
+        }
+        #send-telegram {
+            display: none;
+            margin-top: 15px;
+            background: #0088cc;
+        }
+        #copy-notification {
+            background: #2a9d8f;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-top: 10px;
+            display: none;
+        }
+        .hidden-input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            height: 0;
+        }
+    </style>
 </head>
 <body>
-    <button id="btn">📷 Запустить камеру</button>
-    <video id="video" autoplay playsinline style="width:100%;max-width:400px;display:none;"></video>
-    <script>
-        const btn = document.getElementById('btn');
-        const video = document.getElementById('video');
 
-        btn.addEventListener('click', async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-                video.style.display = 'block';
-                btn.textContent = '✅ Камера работает!';
-            } catch (err) {
-                alert('Ошибка: ' + err.message);
-                btn.textContent = '❌ Ошибка';
+<div id="error-msg"></div>
+<div id="status">📷 Нажмите «Включить камеру»</div>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<div class="controls">
+    <button id="btnCamera">📷 Включить камеру</button>
+    <button id="btnSnap" disabled>📸 Сделать снимок</button>
+    <button id="btnSwitchCamera" class="btn-secondary" style="display:none;">🔄 Переключить камеру</button>
+</div>
+
+<div id="loading">⏳ Определяем цвета...</div>
+<div id="result"></div>
+<button id="send-telegram">📤 Отправить в Telegram</button>
+<div id="copy-notification">✅ Результат скопирован! Вставьте в чат с ботом.</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "chromonym": "https://cdn.jsdelivr.net/npm/chromonym@3.5.0/dist/index.mjs"
+    }
+}
+</script>
+
+<script type="module">
+    import { identify, ral, ncs, pantone } from 'chromonym';
+
+    // ----- ПАЛИТРЫ (можно расширять) -----
+    const tikkurilaData = {
+        name: 'Tikkurila Symphony',
+        colors: {
+            'Y404 - Peltola': '#E8D3B9',
+            'X503 - Kauppa': '#C5A48A',
+            'V499 - Lato': '#A8826A',
+        }
+    };
+    const duluxData = {
+        name: 'Dulux',
+        colors: {
+            'Pure White': '#FFFFFF',
+            'Natural Slate': '#A5A5A5',
+            'Soft Beige': '#D8C8B0',
+        }
+    };
+    const bsData = {
+        name: 'BS 4800',
+        colors: {
+            '04-B-21': '#B8A08E',
+            '10-B-15': '#8E9A9A',
+        }
+    };
+    const palettes = [
+        { id: 'ral', label: 'RAL Classic', palette: ral },
+        { id: 'ncs', label: 'NCS', palette: ncs },
+        { id: 'pantone', label: 'Pantone', palette: pantone },
+        { id: 'tikkurila', label: 'Tikkurila Symphony', palette: tikkurilaData },
+        { id: 'dulux', label: 'Dulux', palette: duluxData },
+        { id: 'bs', label: 'BS 4800', palette: bsData },
+    ];
+
+    // ----- DOM -----
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    const errorDiv = document.getElementById('error-msg');
+    const btnCamera = document.getElementById('btnCamera');
+    const btnSnap = document.getElementById('btnSnap');
+    const btnSwitchCamera = document.getElementById('btnSwitchCamera');
+    const loadingDiv = document.getElementById('loading');
+    const resultDiv = document.getElementById('result');
+    const sendTelegramBtn = document.getElementById('send-telegram');
+    const copyNotification = document.getElementById('copy-notification');
+
+    let stream = null;
+    let cameraActive = false;
+    let currentFacingMode = 'environment'; // 'environment' или 'user'
+    let lastResultText = '';
+
+    // ----- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ -----
+    function setStatus(msg) {
+        statusDiv.textContent = msg;
+    }
+    function showError(msg) {
+        errorDiv.textContent = msg;
+        errorDiv.style.display = 'block';
+    }
+    function hideError() {
+        errorDiv.style.display = 'none';
+    }
+    function rgbToHex(r, g, b) {
+        return '#' + [r, g, b].map(c => Math.round(c).toString(16).padStart(2, '0')).join('');
+    }
+    function hexToRgb(hex) {
+        const res = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return res ? { r: parseInt(res[1],16), g: parseInt(res[2],16), b: parseInt(res[3],16) } : null;
+    }
+    function colorDistance(r1,g1,b1, r2,g2,b2) {
+        const dr = r1-r2, dg = g1-g2, db = b1-b2;
+        return Math.sqrt(dr*dr + dg*dg + db*db);
+    }
+    function findClosestColors(r, g, b, paletteObj, count=2) {
+        const colors = paletteObj.colors;
+        if (!colors || Object.keys(colors).length===0) return [];
+        return Object.entries(colors)
+            .map(([name, hex]) => {
+                const c = hexToRgb(hex);
+                if (!c) return null;
+                return { name, hex, dist: colorDistance(r,g,b, c.r,c.g,c.b) };
+            })
+            .filter(Boolean)
+            .sort((a,b) => a.dist - b.dist)
+            .slice(0, count);
+    }
+    function getPercentage(dist) {
+        const maxDist = Math.sqrt(3) * 255;
+        return Math.round((1 - Math.min(dist/maxDist, 1)) * 100);
+    }
+
+    // ----- АНАЛИЗ ИЗОБРАЖЕНИЯ -----
+    function analyzeImage(imageSource) {
+        const width = imageSource.videoWidth || imageSource.width;
+        const height = imageSource.videoHeight || imageSource.height;
+        if (!width || !height) {
+            showError('Не удалось получить размеры изображения');
+            return;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(imageSource, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        let r=0,g=0,b=0,count=0;
+        for (let i=0; i<data.length; i+=4) {
+            r += data[i];
+            g += data[i+1];
+            b += data[i+2];
+            count++;
+        }
+        r /= count; g /= count; b /= count;
+        const hex = rgbToHex(r, g, b);
+
+        loadingDiv.style.display = 'block';
+        resultDiv.innerHTML = '';
+        setTimeout(() => {
+            let html = '';
+            let fullResult = `🎨 Результат определения цвета:\n\n`;
+            for (const p of palettes) {
+                const matches = findClosestColors(r, g, b, p.palette, 2);
+                if (matches.length===0) {
+                    html += `<div class="palette-block"><div class="palette-title">${p.label}</div><div class="no-result">Нет данных</div></div>`;
+                    continue;
+                }
+                let matchHtml = '';
+                fullResult += `${p.label}:\n`;
+                for (const m of matches) {
+                    const percent = getPercentage(m.dist);
+                    matchHtml += `
+                        <div class="color-match">
+                            <div class="color-swatch" style="background:${m.hex}"></div>
+                            <span class="color-name">${m.name} <span class="hex-code">${m.hex}</span></span>
+                            <span class="color-percent">${percent}%</span>
+                        </div>
+                    `;
+                    fullResult += `  ${m.name} (${m.hex}) — ${percent}%\n`;
+                }
+                html += `<div class="palette-block"><div class="palette-title">${p.label}</div>${matchHtml}</div>`;
+                fullResult += '\n';
             }
-        });
-    </script>
+            resultDiv.innerHTML = html;
+            loadingDiv.style.display = 'none';
+            sendTelegramBtn.style.display = 'inline-block';
+            lastResultText = fullResult;
+        }, 100);
+    }
+
+    // ----- ЗАПУСК КАМЕРЫ -----
+    async function startCamera(facingMode = 'environment') {
+        hideError();
+        setStatus('⏳ Запрос доступа...');
+        btnCamera.disabled = true;
+
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('getUserMedia не поддерживается');
+            }
+
+            const constraints = {
+                video: {
+                    facingMode: facingMode,
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                },
+                audio: false
+            };
+
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            video.style.display = 'block';
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resolve();
+                };
+            });
+
+            cameraActive = true;
+            btnSnap.disabled = false;
+            btnCamera.style.display = 'none';
+            btnSwitchCamera.style.display = 'inline-block';
+            currentFacingMode = facingMode;
+            setStatus(`📸 Камера работает (${facingMode === 'environment' ? 'задняя' : 'фронтальная'})`);
+        } catch (err) {
+            console.error('Camera error:', err);
+            // Если не удалось с environment, пробуем user
+            if (facingMode === 'environment') {
+                setStatus('⚠️ Задняя камера не доступна, пробуем фронтальную...');
+                await startCamera('user');
+                return;
+            }
+            let msg = '⚠️ Ошибка доступа к камере.\n\n';
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                msg += 'Вы запретили доступ. Разрешите в настройках браузера и обновите страницу.';
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                msg += 'Камера не найдена.';
+            } else {
+                msg += `Ошибка: ${err.message}`;
+            }
+            showError(msg);
+            setStatus('❌ Не удалось запустить камеру');
+            btnCamera.disabled = false;
+            btnCamera.style.display = 'inline-block';
+            btnSwitchCamera.style.display = 'none';
+        }
+    }
+
+    // ----- ОСТАНОВКА КАМЕРЫ -----
+    function stopCamera() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+        video.srcObject = null;
+        video.style.display = 'none';
+        cameraActive = false;
+        btnSnap.disabled = true;
+        btnCamera.style.display = 'inline-block';
+        btnCamera.disabled = false;
+        btnSwitchCamera.style.display = 'none';
+        setStatus('📷 Камера отключена');
+    }
+
+    // ----- ПЕРЕКЛЮЧЕНИЕ КАМЕРЫ -----
+    function switchCamera() {
+        if (!cameraActive) return;
+        const newMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+        stopCamera();
+        setTimeout(() => startCamera(newMode), 300);
+    }
+
+    // ----- ОБРАБОТЧИКИ -----
+    btnCamera.addEventListener('click', () => startCamera('environment'));
+
+    btnSnap.addEventListener('click', () => {
+        if (!cameraActive) return;
+        analyzeImage(video);
+    });
+
+    btnSwitchCamera.addEventListener('click', switchCamera);
+
+    // ----- ОТПРАВКА В TELEGRAM -----
+    sendTelegramBtn.addEventListener('click', () => {
+        if (!lastResultText) return;
+
+        // Способ 1: Копирование в буфер обмена
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(lastResultText).then(() => {
+                copyNotification.textContent = '✅ Результат скопирован! Вставьте в чат с ботом.';
+                copyNotification.style.display = 'block';
+                setTimeout(() => copyNotification.style.display = 'none', 5000);
+            }).catch(() => {
+                // fallback
+                copyTextFallback(lastResultText);
+            });
+        } else {
+            copyTextFallback(lastResultText);
+        }
+
+        // Способ 2: Открыть чат с ботом с предзаполненным сообщением (работает на телефонах)
+        const botUsername = 'DetectorColorbot'; // замените на вашего бота
+        const encodedText = encodeURIComponent(lastResultText);
+        const tgLink = `tg://resolve?domain=${botUsername}&text=${encodedText}`;
+        // Открываем в новой вкладке (на телефоне откроет Telegram)
+        window.open(tgLink, '_blank');
+    });
+
+    // Fallback для копирования
+    function copyTextFallback(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            copyNotification.textContent = '✅ Результат скопирован! Вставьте в чат с ботом.';
+            copyNotification.style.display = 'block';
+            setTimeout(() => copyNotification.style.display = 'none', 5000);
+        } catch (e) {
+            alert('Не удалось скопировать. Скопируйте текст вручную:\n\n' + text);
+        }
+        document.body.removeChild(textarea);
+    }
+
+    // Инициализация
+    setStatus('📷 Нажмите «Включить камеру»');
+</script>
 </body>
 </html>
