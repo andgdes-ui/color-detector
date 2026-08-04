@@ -5,13 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Тест камеры</title>
     <style>
-        video { width: 100%; max-width: 400px; background: #000; }
+        video { 
+            width: 100%; 
+            max-width: 400px; 
+            background: #000; 
+            display: block;
+        }
         button { padding: 16px; font-size: 18px; margin: 10px; }
         #result { margin-top: 20px; font-size: 20px; }
+        #status { margin: 10px 0; color: #aaa; }
     </style>
 </head>
 <body>
     <video id="video" autoplay playsinline></video>
+    <div id="status">⏳ Нажмите «Включить камеру»</div>
     <button id="btnStart">▶️ Включить камеру</button>
     <button id="btnSnap" disabled>📸 Снимок</button>
     <canvas id="canvas" style="display:none;"></canvas>
@@ -24,26 +31,47 @@
         const btnStart = document.getElementById('btnStart');
         const btnSnap = document.getElementById('btnSnap');
         const resultDiv = document.getElementById('result');
+        const statusDiv = document.getElementById('status');
 
         let stream = null;
+        let videoReady = false;
 
         btnStart.addEventListener('click', async () => {
             try {
+                statusDiv.textContent = '⏳ Запрос камеры...';
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+                    video: { 
+                        facingMode: 'environment', 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 } 
+                    }
                 });
+                statusDiv.textContent = '✅ Поток получен, подключаю к видео...';
+                
                 video.srcObject = stream;
                 video.style.display = 'block';
+                // Принудительно запускаем воспроизведение
+                await video.play();
+                statusDiv.textContent = '✅ Видео воспроизводится';
                 btnSnap.disabled = false;
                 btnStart.disabled = true;
-                resultDiv.textContent = '✅ Камера работает';
+                videoReady = true;
             } catch (err) {
-                resultDiv.textContent = '❌ Ошибка: ' + err.message;
+                statusDiv.textContent = '❌ Ошибка: ' + err.message;
                 console.error(err);
             }
         });
 
         btnSnap.addEventListener('click', () => {
+            if (!videoReady) {
+                resultDiv.textContent = '⚠️ Видео ещё не готово';
+                return;
+            }
+            // Проверяем, есть ли изображение
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                resultDiv.textContent = '⚠️ Видео не загружено (размер 0)';
+                return;
+            }
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             ctx.drawImage(video, 0, 0);
