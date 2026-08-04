@@ -1,10 +1,11 @@
 import asyncio
 import json
 import logging
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import Command
-from aiohttp import web  # <-- Новая библиотека для веб-сервера
+from aiohttp import web  # <--- ЭТА БИБЛИОТЕКА НУЖНА ДЛЯ ВЕБ-СЕРВЕРА
 
 # --- Ваши данные ---
 BOT_TOKEN = "8744042828:AAGea9YUqQbLfKD1M7x2Ah8mNel_U1mdMtQ"
@@ -33,19 +34,20 @@ async def handle_data(message: types.Message):
     except:
         await message.answer("Ошибка обработки")
 
-# --- ЗДЕСЬ НОВЫЙ КОД: Запускаем веб-сервер для Render ---
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы он не ругался) ---
 async def health_check(request):
     return web.Response(text="I'm alive!")
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_get('/', health_check)  # <-- Будет отвечать на запросы по адресу /
+    app.router.add_get('/', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 8080))) # <-- Слушаем порт от Render
+    # Слушаем порт, который дает Render, или 8080 по умолчанию
+    port = int(os.environ.get('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"✅ Веб-сервер запущен на порту {os.environ.get('PORT', 8080)}")
-    # Бесконечно держим сервер включенным
+    print(f"✅ Веб-сервер запущен на порту {port}")
     await asyncio.Event().wait()
 
 # --- Основная функция ---
@@ -53,13 +55,11 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем поллинг бота и веб-сервер параллельно
+    # Запускаем и бота, и веб-сервер параллельно
     await asyncio.gather(
         dp.start_polling(bot),
         start_web_server()
     )
 
 if __name__ == "__main__":
-    # Добавляем импорт os для получения переменной PORT
-    import os
     asyncio.run(main())
