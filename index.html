@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Определитель цвета</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; background: #1f1f1f; color: #fff; }
+        video, canvas { display: none; }
+        #camera { display: block; width: 100%; max-width: 400px; border-radius: 12px; margin-top: 20px; }
+        .controls { margin: 20px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; align-items: center; }
+        select, button { padding: 12px 24px; border: none; border-radius: 30px; font-size: 18px; background: #2a9d8f; color: white; cursor: pointer; }
+        select { background: #264653; }
+        #result { margin-top: 20px; font-size: 24px; display: flex; align-items: center; gap: 20px; }
+        .color-preview { width: 80px; height: 80px; border-radius: 50%; border: 3px solid white; }
+    </style>
+</head>
+<body>
+
+<video id="camera" autoplay playsinline></video>
+<canvas id="canvas" width="200" height="200"></canvas>
+
+<div class="controls">
+    <select id="colorSystem">
+        <option value="ncs">NCS</option>
+        <option value="ral">RAL Classic</option>
+        <option value="pantone">Pantone</option>
+        <!-- Benjamin Moore можно добавить позже -->
+    </select>
+    <button id="snap">📸 Сделать снимок</button>
+    <button id="send" style="display:none;">✅ Отправить боту</button>
+</div>
+
+<div id="result" style="display:none;">
+    <span id="colorName">Цвет</span>
+    <span class="color-preview" id="colorBox"></span>
+    <span id="hexCode">#000000</span>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "chromonym": "https://cdn.jsdelivr.net/npm/chromonym@3.5.0/dist/index.mjs"
+    }
+}
+</script>
+
+<script type="module">
+    import { identify, ncs, ral, pantone } from 'chromonym';
+
+    const video = document.getElementById('camera');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const snapBtn = document.getElementById('snap');
+    const sendBtn = document.getElementById('send');
+    const resultDiv = document.getElementById('result');
+    const colorNameSpan = document.getElementById('colorName');
+    const hexSpan = document.getElementById('hexCode');
+    const colorBox = document.getElementById('colorBox');
+    const systemSelect = document.getElementById('colorSystem');
+
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            video.srcObject = stream;
+        } catch (err) {
+            alert('Не удалось получить доступ к камере: ' + err.message);
+        }
+    }
+
+    function rgbToHex(r, g, b) {
+        return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+    }
+
+    snapBtn.addEventListener('click', () => {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            r += data[i];
+            g += data[i+1];
+            b += data[i+2];
+            count++;
+        }
+        r = Math.round(r / count);
+        g = Math.round(g / count);
+        b = Math.round(b / count);
+
+        const hex = rgbToHex(r, g, b);
+        const system = systemSelect.value;
+        let palette;
+        switch(system) {
+            case 'ncs': palette = ncs; break;
+            case 'ral': palette = ral; break;
+            case 'pantone': palette = pantone; break;
+            default: palette = ncs;
+        }
+        let resultName;
+        try {
+            resultName = identify(hex, { palette: palette });
+        } catch(e) {
+            resultName = 'Не определён';
+        }
+
+        colorNameSpan.textContent = `${system.toUpperCase()}: ${resultName}`;
+        hexSpan.textContent = hex;
+        colorBox.style.backgroundColor = hex;
+        resultDiv.style.display = 'flex';
+        sendBtn.style.display = 'inline-block';
+    });
+
+    sendBtn.addEventListener('click', () => {
+        const data = {
+            color_name: colorNameSpan.textContent,
+            hex: hexSpan.textContent,
+            system: systemSelect.value
+        };
+        Telegram.WebApp.sendData(JSON.stringify(data));
+        Telegram.WebApp.close();
+    });
+
+    startCamera();
+</script>
+</body>
+</html>
