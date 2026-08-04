@@ -45,6 +45,10 @@
             transition: 0.2s;
         }
         button:active { transform: scale(0.95); }
+        button:disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
         #result {
             width: 100%;
             max-width: 500px;
@@ -111,6 +115,14 @@
             word-break: break-all;
             display: none;
         }
+        #status {
+            color: #aaa;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        #start-camera-btn {
+            background: #264653;
+        }
     </style>
 </head>
 <body>
@@ -119,10 +131,12 @@
 <canvas id="canvas" width="200" height="200"></canvas>
 
 <div id="error-msg"></div>
+<div id="status">⏳ Нажмите "Включить камеру"</div>
 <div id="debug"></div>
 
 <div class="controls">
-    <button id="snap">📸 Сделать снимок</button>
+    <button id="start-camera-btn">📷 Включить камеру</button>
+    <button id="snap" disabled>📸 Сделать снимок</button>
     <button id="retry" style="display:none;">🔄 Попробовать снова</button>
     <button id="send" style="display:none;">✅ Отправить боту</button>
 </div>
@@ -140,7 +154,7 @@
 <script type="module">
     import { identify, ral, ncs, pantone } from 'chromonym';
 
-    // --- ПАЛИТРЫ (примеры) ---
+    // --- ПАЛИТРЫ ---
     const tikkurilaData = {
         name: 'Tikkurila Symphony',
         colors: {
@@ -173,10 +187,11 @@
         { id: 'bs', label: 'BS 4800', palette: bsData },
     ];
 
-    // --- ОБЪЯВЛЕНИЕ ЭЛЕМЕНТОВ ---
+    // --- ЭЛЕМЕНТЫ ---
     const video = document.getElementById('camera');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const startCamBtn = document.getElementById('start-camera-btn');
     const snapBtn = document.getElementById('snap');
     const sendBtn = document.getElementById('send');
     const retryBtn = document.getElementById('retry');
@@ -184,14 +199,32 @@
     const loadingDiv = document.getElementById('loading');
     const errorDiv = document.getElementById('error-msg');
     const debugDiv = document.getElementById('debug');
+    const statusDiv = document.getElementById('status');
 
-    // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+    let stream = null;
+    let cameraStarted = false;
+
+    // --- ЛОГИ ---
     function logDebug(msg) {
         debugDiv.style.display = 'block';
         debugDiv.textContent += msg + '\n';
         console.log(msg);
     }
 
+    function setStatus(msg) {
+        statusDiv.textContent = msg;
+    }
+
+    function showError(msg) {
+        errorDiv.textContent = msg;
+        errorDiv.style.display = 'block';
+    }
+
+    function hideError() {
+        errorDiv.style.display = 'none';
+    }
+
+    // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
     function rgbToHex(r, g, b) {
         return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
     }
@@ -232,17 +265,18 @@
         return Math.round((1 - normalized) * 100);
     }
 
-    // --- ОСНОВНАЯ ЛОГИКА КАМЕРЫ ---
+    // --- ЗАПУСК КАМЕРЫ ПО КЛИКУ ---
     async function startCamera() {
-        logDebug('▶️ startCamera() вызвана');
+        logDebug('▶️ startCamera() вызвана по клику');
+        startCamBtn.disabled = true;
+        setStatus('⏳ Запрос доступа к камере...');
+
         try {
-            // Проверка поддержки
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                throw new Error('getUserMedia не поддерживается браузером');
+                throw new Error('getUserMedia не поддерживается');
             }
             logDebug('✅ getUserMedia доступен');
 
-            // Запрос камеры с явными параметрами
             const constraints = {
                 video: {
                     facingMode: 'environment',
@@ -253,15 +287,14 @@
             };
             logDebug(`📷 Запрашиваем камеру с constraints: ${JSON.stringify(constraints)}`);
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
             logDebug('✅ Поток получен');
 
             video.srcObject = stream;
             video.style.display = 'block';
-            errorDiv.style.display = 'none';
-            retryBtn.style.display = 'none';
+            hideError();
 
-            // Ждём, когда видео загрузится
+            // Ждём загрузки видео
             await new Promise((resolve) => {
                 video.onloadedmetadata = () => {
                     video.play();
@@ -270,29 +303,55 @@
                 };
             });
 
+            cameraStarted = true;
+            snapBtn.disabled = false;
+            startCamBtn.style.display = 'none';
+            setStatus('📸 Камера работает, нажмите "Сделать снимок"');
             logDebug('✅ Камера успешно запущена');
+
         } catch (err) {
-            logDebug(`❌ Ошибка при запуске камеры: ${err.name} - ${err.message}`);
-            let errorMessage = '⚠️ Не удалось получить доступ к камере.\n\n';
+            logDebug(`❌ Ошибка: ${err.name} - ${err.message}`);
+            let msg = '⚠️ Не удалось получить доступ к камере.\n\n';
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                errorMessage += 'Вы запретили доступ к камере. Разрешите в настройках браузера и обновите страницу.';
+                msg += 'Вы запретили доступ. Разрешите в настройках браузера и обновите страницу.';
             } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-                errorMessage += 'Камера не найдена. Убедитесь, что она подключена.';
+                msg += 'Камера не найдена. Убедитесь, что она подключена.';
             } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-                errorMessage += 'Камера занята другим приложением. Закройте другие программы.';
+                msg += 'Камера занята другим приложением.';
             } else {
-                errorMessage += `Ошибка: ${err.message}`;
+                msg += `Ошибка: ${err.message}`;
             }
-            errorDiv.textContent = errorMessage;
-            errorDiv.style.display = 'block';
+            showError(msg);
+            setStatus('❌ Ошибка камеры');
+            startCamBtn.disabled = false;
             retryBtn.style.display = 'inline-block';
         }
     }
 
-    // --- ОБРАБОТЧИК СНИМКА ---
+    // --- ПОВТОРНАЯ ПОПЫТКА ---
+    retryBtn.addEventListener('click', () => {
+        retryBtn.style.display = 'none';
+        startCamBtn.style.display = 'inline-block';
+        startCamBtn.disabled = false;
+        setStatus('⏳ Нажмите "Включить камеру"');
+        hideError();
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+            stream = null;
+        }
+        cameraStarted = false;
+        snapBtn.disabled = true;
+        video.srcObject = null;
+        video.style.display = 'none';
+    });
+
+    // --- КНОПКА ВКЛЮЧИТЬ КАМЕРУ ---
+    startCamBtn.addEventListener('click', startCamera);
+
+    // --- КНОПКА СДЕЛАТЬ СНИМОК ---
     snapBtn.addEventListener('click', () => {
-        if (!video.srcObject) {
-            alert('Камера не запущена. Нажмите "Попробовать снова".');
+        if (!cameraStarted || !stream) {
+            alert('Камера не запущена');
             return;
         }
 
@@ -346,13 +405,6 @@
         }, 100);
     });
 
-    // --- ПОВТОРНАЯ ПОПЫТКА ---
-    retryBtn.addEventListener('click', () => {
-        errorDiv.style.display = 'none';
-        retryBtn.style.display = 'none';
-        startCamera();
-    });
-
     // --- ОТПРАВКА БОТУ ---
     sendBtn.addEventListener('click', () => {
         const data = {
@@ -365,7 +417,7 @@
 
     // --- СТАРТ ---
     logDebug('🚀 Приложение загружено');
-    startCamera();
+    setStatus('📷 Нажмите "Включить камеру"');
 </script>
 </body>
 </html>
