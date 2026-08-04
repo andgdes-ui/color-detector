@@ -1,261 +1,324 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Колеровка по фото</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; }
-    body {
-      font-family: system-ui, sans-serif;
-      background: #121212;
-      color: #eee;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 20px;
-      min-height: 100vh;
-    }
-    #preview {
-      max-width: 100%;
-      max-height: 300px;
-      border-radius: 16px;
-      margin: 15px 0;
-      display: none;
-    }
-    button {
-      padding: 14px 28px;
-      border: none;
-      border-radius: 40px;
-      font-size: 18px;
-      background: #2a9d8f;
-      color: #fff;
-      cursor: pointer;
-      font-weight: 600;
-      transition: 0.2s;
-      margin: 5px;
-    }
-    button:active { transform: scale(0.95); }
-    #result {
-      width: 100%;
-      max-width: 500px;
-      margin-top: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .palette-block {
-      background: #1e1e1e;
-      border-radius: 16px;
-      padding: 16px 20px;
-      border-left: 5px solid #2a9d8f;
-    }
-    .palette-title {
-      font-size: 18px;
-      font-weight: bold;
-      margin-bottom: 8px;
-    }
-    .color-match {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 6px 0;
-      border-bottom: 1px solid #333;
-    }
-    .color-match:last-child { border-bottom: none; }
-    .color-swatch {
-      width: 40px;
-      height: 40px;
-      border-radius: 8px;
-      border: 1px solid #555;
-      flex-shrink: 0;
-    }
-    .color-name { flex: 1; font-size: 16px; }
-    .color-percent { font-size: 18px; font-weight: 700; color: #2a9d8f; }
-    .hex-code { font-size: 13px; color: #aaa; margin-left: 8px; }
-    #loading { display: none; color: #aaa; margin-top: 20px; }
-    #send { margin-top: 20px; background: #e76f51; display: none; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Определитель цвета</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; }
+        body {
+            font-family: system-ui, sans-serif;
+            background: #121212;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        video, canvas { display: none; }
+        #camera {
+            display: block;
+            width: 100%;
+            max-width: 400px;
+            border-radius: 20px;
+            background: #000;
+            margin-bottom: 20px;
+            min-height: 300px;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 40px;
+            font-size: 18px;
+            background: #2a9d8f;
+            color: #fff;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        button:active { transform: scale(0.95); }
+        button:disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        #result {
+            width: 100%;
+            max-width: 500px;
+            margin-top: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .palette-block {
+            background: #1e1e1e;
+            border-radius: 16px;
+            padding: 16px 20px;
+            border-left: 5px solid #2a9d8f;
+        }
+        .palette-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .color-match {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 6px 0;
+            border-bottom: 1px solid #333;
+        }
+        .color-match:last-child { border-bottom: none; }
+        .color-swatch {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 1px solid #555;
+            flex-shrink: 0;
+        }
+        .color-name { flex: 1; font-size: 16px; }
+        .color-percent { font-size: 18px; font-weight: 700; color: #2a9d8f; }
+        .hex-code { font-size: 13px; color: #aaa; margin-left: 8px; }
+        #loading { display: none; color: #aaa; margin-top: 20px; }
+        #error-msg {
+            background: #442222;
+            color: #ff6b6b;
+            padding: 15px;
+            border-radius: 12px;
+            margin-top: 20px;
+            display: none;
+            max-width: 400px;
+            text-align: center;
+        }
+        #send { margin-top: 20px; background: #e76f51; display: none; }
+        #status {
+            color: #aaa;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        #start-camera-btn {
+            background: #264653;
+        }
+    </style>
 </head>
 <body>
 
-<input type="file" accept="image/*" capture="environment" id="cameraInput" style="display:none;">
+<video id="camera" autoplay playsinline></video>
+<canvas id="canvas" width="200" height="200"></canvas>
 
-<button id="openCamera">📸 Сделать фото</button>
-<img id="preview" alt="Предпросмотр">
+<div id="error-msg"></div>
+<div id="status">📷 Нажмите "Включить камеру"</div>
 
+<div class="controls">
+    <button id="start-camera-btn">📷 Включить камеру</button>
+    <button id="snap" disabled>📸 Сделать снимок</button>
+    <button id="send">✅ Отправить боту</button>
+</div>
 <div id="loading">⏳ Определяем цвета...</div>
 <div id="result"></div>
-<button id="send">✅ Отправить боту</button>
 
 <script type="importmap">
 {
-  "imports": {
-    "chromonym": "https://cdn.jsdelivr.net/npm/chromonym@3.5.0/dist/index.mjs"
-  }
+    "imports": {
+        "chromonym": "https://cdn.jsdelivr.net/npm/chromonym@3.5.0/dist/index.mjs"
+    }
 }
 </script>
 
 <script type="module">
-  import { identify, ral, ncs, pantone } from 'chromonym';
+    import { identify, ral, ncs, pantone } from 'chromonym';
 
-  // ----- ПАЛИТРЫ (можно расширять) -----
-  const tikkurilaData = {
-    name: 'Tikkurila Symphony',
-    colors: {
-      'Y404 - Peltola': '#E8D3B9',
-      'X503 - Kauppa': '#C5A48A',
-      'V499 - Lato': '#A8826A',
-    }
-  };
-  const duluxData = {
-    name: 'Dulux',
-    colors: {
-      'Pure White': '#FFFFFF',
-      'Natural Slate': '#A5A5A5',
-      'Soft Beige': '#D8C8B0',
-    }
-  };
-  const bsData = {
-    name: 'BS 4800',
-    colors: {
-      '04-B-21': '#B8A08E',
-      '10-B-15': '#8E9A9A',
-    }
-  };
-  const palettes = [
-    { id: 'ral', label: 'RAL Classic', palette: ral },
-    { id: 'ncs', label: 'NCS', palette: ncs },
-    { id: 'pantone', label: 'Pantone', palette: pantone },
-    { id: 'tikkurila', label: 'Tikkurila Symphony', palette: tikkurilaData },
-    { id: 'dulux', label: 'Dulux', palette: duluxData },
-    { id: 'bs', label: 'BS 4800', palette: bsData },
-  ];
-
-  // ----- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ -----
-  function rgbToHex(r, g, b) {
-    return '#' + [r, g, b].map(c => Math.round(c).toString(16).padStart(2, '0')).join('');
-  }
-
-  function hexToRgb(hex) {
-    const res = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return res ? { r: parseInt(res[1],16), g: parseInt(res[2],16), b: parseInt(res[3],16) } : null;
-  }
-
-  function colorDistance(r1,g1,b1, r2,g2,b2) {
-    const dr = r1-r2, dg = g1-g2, db = b1-b2;
-    return Math.sqrt(dr*dr + dg*dg + db*db);
-  }
-
-  function findClosestColors(r, g, b, paletteObj, count=2) {
-    const colors = paletteObj.colors;
-    if (!colors || Object.keys(colors).length===0) return [];
-    return Object.entries(colors)
-      .map(([name, hex]) => {
-        const c = hexToRgb(hex);
-        if (!c) return null;
-        return { name, hex, dist: colorDistance(r,g,b, c.r,c.g,c.b) };
-      })
-      .filter(Boolean)
-      .sort((a,b) => a.dist - b.dist)
-      .slice(0, count);
-  }
-
-  function getPercentage(dist) {
-    const maxDist = Math.sqrt(3) * 255;
-    return Math.round((1 - Math.min(dist/maxDist, 1)) * 100);
-  }
-
-  // ----- ОБРАБОТКА ФОТО -----
-  const fileInput = document.getElementById('cameraInput');
-  const preview = document.getElementById('preview');
-  const resultDiv = document.getElementById('result');
-  const loadingDiv = document.getElementById('loading');
-  const sendBtn = document.getElementById('send');
-  const openCamBtn = document.getElementById('openCamera');
-
-  let lastColorData = null; // сохраним для отправки
-
-  openCamBtn.addEventListener('click', () => fileInput.click());
-
-  fileInput.addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      preview.src = ev.target.result;
-      preview.style.display = 'block';
-      // Анализируем изображение
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        let r=0, g=0, b=0, count=0;
-        for (let i=0; i<data.length; i+=4) {
-          r += data[i];
-          g += data[i+1];
-          b += data[i+2];
-          count++;
+    const tikkurilaData = {
+        name: 'Tikkurila Symphony',
+        colors: {
+            'Y404 - Peltola': '#E8D3B9',
+            'X503 - Kauppa': '#C5A48A',
+            'V499 - Lato': '#A8826A',
         }
-        r = r / count;
-        g = g / count;
-        b = b / count;
+    };
+    const duluxData = {
+        name: 'Dulux',
+        colors: {
+            'Pure White': '#FFFFFF',
+            'Natural Slate': '#A5A5A5',
+            'Soft Beige': '#D8C8B0',
+        }
+    };
+    const bsData = {
+        name: 'BS 4800',
+        colors: {
+            '04-B-21': '#B8A08E',
+            '10-B-15': '#8E9A9A',
+        }
+    };
+    const palettes = [
+        { id: 'ral', label: 'RAL Classic', palette: ral },
+        { id: 'ncs', label: 'NCS', palette: ncs },
+        { id: 'pantone', label: 'Pantone', palette: pantone },
+        { id: 'tikkurila', label: 'Tikkurila Symphony', palette: tikkurilaData },
+        { id: 'dulux', label: 'Dulux', palette: duluxData },
+        { id: 'bs', label: 'BS 4800', palette: bsData },
+    ];
+
+    const video = document.getElementById('camera');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const startCamBtn = document.getElementById('start-camera-btn');
+    const snapBtn = document.getElementById('snap');
+    const sendBtn = document.getElementById('send');
+    const resultDiv = document.getElementById('result');
+    const loadingDiv = document.getElementById('loading');
+    const errorDiv = document.getElementById('error-msg');
+    const statusDiv = document.getElementById('status');
+
+    let stream = null;
+    let cameraStarted = false;
+
+    function setStatus(msg) {
+        statusDiv.textContent = msg;
+    }
+    function showError(msg) {
+        errorDiv.textContent = msg;
+        errorDiv.style.display = 'block';
+    }
+    function hideError() {
+        errorDiv.style.display = 'none';
+    }
+
+    function rgbToHex(r, g, b) {
+        return '#' + [r, g, b].map(c => Math.round(c).toString(16).padStart(2, '0')).join('');
+    }
+    function hexToRgb(hex) {
+        const res = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return res ? { r: parseInt(res[1],16), g: parseInt(res[2],16), b: parseInt(res[3],16) } : null;
+    }
+    function colorDistance(r1,g1,b1, r2,g2,b2) {
+        const dr = r1-r2, dg = g1-g2, db = b1-b2;
+        return Math.sqrt(dr*dr + dg*dg + db*db);
+    }
+    function findClosestColors(r, g, b, paletteObj, count=2) {
+        const colors = paletteObj.colors;
+        if (!colors || Object.keys(colors).length===0) return [];
+        return Object.entries(colors)
+            .map(([name, hex]) => {
+                const c = hexToRgb(hex);
+                if (!c) return null;
+                return { name, hex, dist: colorDistance(r,g,b, c.r,c.g,c.b) };
+            })
+            .filter(Boolean)
+            .sort((a,b) => a.dist - b.dist)
+            .slice(0, count);
+    }
+    function getPercentage(dist) {
+        const maxDist = Math.sqrt(3) * 255;
+        return Math.round((1 - Math.min(dist/maxDist, 1)) * 100);
+    }
+
+    async function startCamera() {
+        startCamBtn.disabled = true;
+        setStatus('⏳ Запрос доступа...');
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('getUserMedia не поддерживается');
+            }
+            const constraints = {
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                },
+                audio: false
+            };
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            video.style.display = 'block';
+            hideError();
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resolve();
+                };
+            });
+            cameraStarted = true;
+            snapBtn.disabled = false;
+            startCamBtn.style.display = 'none';
+            setStatus('📸 Камера работает, нажмите "Сделать снимок"');
+        } catch (err) {
+            let msg = '⚠️ Ошибка доступа к камере.\n\n';
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                msg += 'Вы запретили доступ. Разрешите в настройках браузера и обновите страницу.';
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                msg += 'Камера не найдена.';
+            } else {
+                msg += `Ошибка: ${err.message}`;
+            }
+            showError(msg);
+            setStatus('❌ Ошибка');
+            startCamBtn.disabled = false;
+        }
+    }
+
+    startCamBtn.addEventListener('click', startCamera);
+
+    snapBtn.addEventListener('click', () => {
+        if (!cameraStarted) return;
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        ctx.drawImage(video, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        let r=0,g=0,b=0,count=0;
+        for (let i=0; i<data.length; i+=4) {
+            r += data[i];
+            g += data[i+1];
+            b += data[i+2];
+            count++;
+        }
+        r /= count; g /= count; b /= count;
         const hex = rgbToHex(r, g, b);
 
-        // Поиск по палитрам
         loadingDiv.style.display = 'block';
         resultDiv.innerHTML = '';
         setTimeout(() => {
-          let html = '';
-          for (const p of palettes) {
-            const matches = findClosestColors(r, g, b, p.palette, 2);
-            if (matches.length===0) {
-              html += `<div class="palette-block"><div class="palette-title">${p.label}</div><div class="no-result">Нет данных</div></div>`;
-              continue;
+            let html = '';
+            for (const p of palettes) {
+                const matches = findClosestColors(r, g, b, p.palette, 2);
+                if (matches.length===0) {
+                    html += `<div class="palette-block"><div class="palette-title">${p.label}</div><div class="no-result">Нет данных</div></div>`;
+                    continue;
+                }
+                let matchHtml = '';
+                for (const m of matches) {
+                    const percent = getPercentage(m.dist);
+                    matchHtml += `
+                        <div class="color-match">
+                            <div class="color-swatch" style="background:${m.hex}"></div>
+                            <span class="color-name">${m.name} <span class="hex-code">${m.hex}</span></span>
+                            <span class="color-percent">${percent}%</span>
+                        </div>
+                    `;
+                }
+                html += `<div class="palette-block"><div class="palette-title">${p.label}</div>${matchHtml}</div>`;
             }
-            let matchHtml = '';
-            for (const m of matches) {
-              const percent = getPercentage(m.dist);
-              matchHtml += `
-                <div class="color-match">
-                  <div class="color-swatch" style="background:${m.hex}"></div>
-                  <span class="color-name">${m.name} <span class="hex-code">${m.hex}</span></span>
-                  <span class="color-percent">${percent}%</span>
-                </div>
-              `;
-            }
-            html += `<div class="palette-block"><div class="palette-title">${p.label}</div>${matchHtml}</div>`;
-          }
-          resultDiv.innerHTML = html;
-          loadingDiv.style.display = 'none';
-          sendBtn.style.display = 'inline-block';
-
-          // Сохраняем данные для отправки
-          lastColorData = {
-            color_name: document.querySelector('.color-name')?.textContent?.trim() || 'неизвестно',
-            hex: hex,
-          };
+            resultDiv.innerHTML = html;
+            loadingDiv.style.display = 'none';
+            sendBtn.style.display = 'inline-block';
         }, 100);
-      };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
-    // сбросим input, чтобы можно было снова выбрать то же фото
-    fileInput.value = '';
-  });
+    });
 
-  // ----- ОТПРАВКА БОТУ -----
-  sendBtn.addEventListener('click', () => {
-    if (lastColorData) {
-      Telegram.WebApp.sendData(JSON.stringify(lastColorData));
-      Telegram.WebApp.close();
-    }
-  });
+    sendBtn.addEventListener('click', () => {
+        const name = document.querySelector('.color-name')?.textContent?.trim() || 'неизвестно';
+        const hex = document.querySelector('.hex-code')?.textContent?.trim() || '';
+        Telegram.WebApp.sendData(JSON.stringify({ color_name: name, hex }));
+        Telegram.WebApp.close();
+    });
 </script>
 </body>
 </html>
