@@ -3,17 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Определитель цвета</title>
+    <title>Колеровка по фото</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; background: #1f1f1f; color: #fff; }
+        * { box-sizing: border-box; margin: 0; }
+        body {
+            font-family: system-ui, sans-serif;
+            background: #121212;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            min-height: 100vh;
+        }
         video, canvas { display: none; }
-        #camera { display: block; width: 100%; max-width: 400px; border-radius: 12px; margin-top: 20px; }
-        .controls { margin: 20px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; align-items: center; }
-        select, button { padding: 12px 24px; border: none; border-radius: 30px; font-size: 18px; background: #2a9d8f; color: white; cursor: pointer; }
-        select { background: #264653; }
-        #result { margin-top: 20px; font-size: 24px; display: flex; align-items: center; gap: 20px; }
-        .color-preview { width: 80px; height: 80px; border-radius: 50%; border: 3px solid white; }
+        #camera {
+            display: block;
+            width: 100%;
+            max-width: 400px;
+            border-radius: 20px;
+            background: #000;
+            margin-bottom: 20px;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 40px;
+            font-size: 18px;
+            background: #2a9d8f;
+            color: #fff;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        button:active { transform: scale(0.95); }
+        #result {
+            width: 100%;
+            max-width: 500px;
+            margin-top: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .palette-block {
+            background: #1e1e1e;
+            border-radius: 16px;
+            padding: 16px 20px;
+            border-left: 5px solid #2a9d8f;
+        }
+        .palette-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .color-match {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 6px 0;
+            border-bottom: 1px solid #333;
+        }
+        .color-match:last-child { border-bottom: none; }
+        .color-swatch {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 1px solid #555;
+            flex-shrink: 0;
+        }
+        .color-name {
+            flex: 1;
+            font-size: 16px;
+        }
+        .color-percent {
+            font-size: 18px;
+            font-weight: 700;
+            color: #2a9d8f;
+        }
+        .no-result {
+            color: #888;
+            font-style: italic;
+        }
+        .hex-code {
+            font-size: 13px;
+            color: #aaa;
+            margin-left: 8px;
+        }
+        #loading {
+            display: none;
+            color: #aaa;
+            margin-top: 20px;
+        }
+        #send {
+            margin-top: 20px;
+            background: #e76f51;
+        }
+        @media (max-width: 480px) {
+            .palette-title { font-size: 16px; }
+            .color-name { font-size: 14px; }
+            .color-percent { font-size: 16px; }
+        }
     </style>
 </head>
 <body>
@@ -22,21 +120,11 @@
 <canvas id="canvas" width="200" height="200"></canvas>
 
 <div class="controls">
-    <select id="colorSystem">
-        <option value="ncs">NCS</option>
-        <option value="ral">RAL Classic</option>
-        <option value="pantone">Pantone</option>
-        <!-- Benjamin Moore можно добавить позже -->
-    </select>
     <button id="snap">📸 Сделать снимок</button>
     <button id="send" style="display:none;">✅ Отправить боту</button>
 </div>
-
-<div id="result" style="display:none;">
-    <span id="colorName">Цвет</span>
-    <span class="color-preview" id="colorBox"></span>
-    <span id="hexCode">#000000</span>
-</div>
+<div id="loading">⏳ Определяем цвета...</div>
+<div id="result"></div>
 
 <script type="importmap">
 {
@@ -47,37 +135,135 @@
 </script>
 
 <script type="module">
-    import { identify, ncs, ral, pantone } from 'chromonym';
+    import { identify, ral, ncs, pantone } from 'chromonym';
 
+    // ----- 1. ВСТРОЕННЫЕ ПАЛИТРЫ -----
+    // chromonym уже даёт объекты с ключами-названиями и значениями-HEX
+
+    // ----- 2. КАСТОМНЫЕ ПАЛИТРЫ (примеры, замените реальными данными) -----
+    // Tikkurila Symphony (пример)
+    const tikkurilaData = {
+        name: 'Tikkurila Symphony',
+        colors: {
+            'Y404 - Peltola': '#E8D3B9',
+            'X503 - Kauppa': '#C5A48A',
+            'V499 - Lato': '#A8826A',
+            'S504 - Saari': '#8B6E5E',
+            'U499 - Huovi': '#6D564A',
+            'T504 - Niittys': '#4F3F38',
+        }
+    };
+
+    // Dulux (пример)
+    const duluxData = {
+        name: 'Dulux',
+        colors: {
+            'Pure White': '#FFFFFF',
+            'Natural Slate': '#A5A5A5',
+            'Soft Beige': '#D8C8B0',
+            'Warm Stone': '#BFA58A',
+            'Deep Charcoal': '#3A3A3A',
+        }
+    };
+
+    // British Standard 4800 (пример)
+    const bsData = {
+        name: 'BS 4800',
+        colors: {
+            '04-B-21': '#B8A08E',
+            '10-B-15': '#8E9A9A',
+            '12-B-19': '#7A8B8B',
+            '18-B-21': '#5C6B6B',
+        }
+    };
+
+    // ----- 3. СОБИРАЕМ ВСЕ ПАЛИТРЫ В МАССИВ -----
+    const palettes = [
+        { id: 'ral', label: 'RAL Classic', palette: ral },
+        { id: 'ncs', label: 'NCS', palette: ncs },
+        { id: 'pantone', label: 'Pantone', palette: pantone },
+        { id: 'tikkurila', label: 'Tikkurila Symphony', palette: tikkurilaData },
+        { id: 'dulux', label: 'Dulux', palette: duluxData },
+        { id: 'bs', label: 'BS 4800', palette: bsData },
+        // Добавьте сюда другие системы (Caparol, Alpina и т.д.)
+    ];
+
+    // ----- 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ -----
+    function rgbToHex(r, g, b) {
+        return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Евклидово расстояние в RGB (0..441.67)
+    function colorDistance(r1, g1, b1, r2, g2, b2) {
+        const dr = r1 - r2;
+        const dg = g1 - g2;
+        const db = b1 - b2;
+        return Math.sqrt(dr*dr + dg*dg + db*db);
+    }
+
+    // Найти N ближайших цветов в палитре (возвращает массив объектов {name, hex, distance})
+    function findClosestColors(r, g, b, paletteObj, count = 2) {
+        const colors = paletteObj.colors;
+        if (!colors || Object.keys(colors).length === 0) return [];
+
+        const entries = Object.entries(colors);
+        const withDist = entries.map(([name, hex]) => {
+            // Преобразуем HEX в RGB
+            const c = hexToRgb(hex);
+            if (!c) return null;
+            const dist = colorDistance(r, g, b, c.r, c.g, c.b);
+            return { name, hex, dist };
+        }).filter(Boolean);
+
+        withDist.sort((a, b) => a.dist - b.dist);
+        return withDist.slice(0, count);
+    }
+
+    // Парсим HEX в RGB
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : null;
+    }
+
+    // Вычисляем процент совпадения (0-100) на основе расстояния
+    function getPercentage(dist) {
+        // max distance = sqrt(3)*255 ≈ 441.67
+        const maxDist = Math.sqrt(3) * 255;
+        const normalized = Math.min(dist / maxDist, 1);
+        return Math.round((1 - normalized) * 100);
+    }
+
+    // ----- 5. ОСНОВНАЯ ЛОГИКА -----
     const video = document.getElementById('camera');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const snapBtn = document.getElementById('snap');
     const sendBtn = document.getElementById('send');
     const resultDiv = document.getElementById('result');
-    const colorNameSpan = document.getElementById('colorName');
-    const hexSpan = document.getElementById('hexCode');
-    const colorBox = document.getElementById('colorBox');
-    const systemSelect = document.getElementById('colorSystem');
+    const loadingDiv = document.getElementById('loading');
 
     async function startCamera() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            });
             video.srcObject = stream;
         } catch (err) {
             alert('Не удалось получить доступ к камере: ' + err.message);
         }
     }
 
-    function rgbToHex(r, g, b) {
-        return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
-    }
-
     snapBtn.addEventListener('click', () => {
+        // Захват кадра
         canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 480;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+        // Усредняем цвет по всем пикселям
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
         let r = 0, g = 0, b = 0, count = 0;
@@ -90,35 +276,70 @@
         r = Math.round(r / count);
         g = Math.round(g / count);
         b = Math.round(b / count);
-
         const hex = rgbToHex(r, g, b);
-        const system = systemSelect.value;
-        let palette;
-        switch(system) {
-            case 'ncs': palette = ncs; break;
-            case 'ral': palette = ral; break;
-            case 'pantone': palette = pantone; break;
-            default: palette = ncs;
-        }
-        let resultName;
-        try {
-            resultName = identify(hex, { palette: palette });
-        } catch(e) {
-            resultName = 'Не определён';
-        }
 
-        colorNameSpan.textContent = `${system.toUpperCase()}: ${resultName}`;
-        hexSpan.textContent = hex;
-        colorBox.style.backgroundColor = hex;
-        resultDiv.style.display = 'flex';
-        sendBtn.style.display = 'inline-block';
+        // Показываем индикатор загрузки
+        loadingDiv.style.display = 'block';
+        resultDiv.innerHTML = '';
+
+        // Немного задержки, чтобы интерфейс обновился
+        setTimeout(() => {
+            // Проходим по всем палитрам
+            let html = '';
+            for (const p of palettes) {
+                const matches = findClosestColors(r, g, b, p.palette, 2);
+                if (matches.length === 0) {
+                    html += `
+                        <div class="palette-block">
+                            <div class="palette-title">${p.label}</div>
+                            <div class="no-result">Нет данных</div>
+                        </div>
+                    `;
+                    continue;
+                }
+
+                // Формируем блок для этой палитры
+                let matchesHtml = '';
+                for (const m of matches) {
+                    const percent = getPercentage(m.dist);
+                    matchesHtml += `
+                        <div class="color-match">
+                            <div class="color-swatch" style="background:${m.hex}"></div>
+                            <span class="color-name">${m.name} <span class="hex-code">${m.hex}</span></span>
+                            <span class="color-percent">${percent}%</span>
+                        </div>
+                    `;
+                }
+
+                html += `
+                    <div class="palette-block">
+                        <div class="palette-title">${p.label}</div>
+                        ${matchesHtml}
+                    </div>
+                `;
+            }
+
+            resultDiv.innerHTML = html;
+            loadingDiv.style.display = 'none';
+            sendBtn.style.display = 'inline-block';
+        }, 100);
     });
 
+    // Отправка результата боту (все данные)
     sendBtn.addEventListener('click', () => {
+        // Собираем все данные из resultDiv (можно упростить)
         const data = {
-            color_name: colorNameSpan.textContent,
-            hex: hexSpan.textContent,
-            system: systemSelect.value
+            color: document.querySelector('.color-name')?.textContent?.trim() || 'неизвестно',
+            hex: document.querySelector('.hex-code')?.textContent?.trim() || '',
+            all: Array.from(document.querySelectorAll('.palette-block')).map(block => {
+                const title = block.querySelector('.palette-title')?.textContent?.trim() || '';
+                const matches = Array.from(block.querySelectorAll('.color-match')).map(m => {
+                    const name = m.querySelector('.color-name')?.textContent?.trim() || '';
+                    const percent = m.querySelector('.color-percent')?.textContent?.trim() || '';
+                    return { name, percent };
+                });
+                return { palette: title, matches };
+            })
         };
         Telegram.WebApp.sendData(JSON.stringify(data));
         Telegram.WebApp.close();
